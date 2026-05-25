@@ -1,7 +1,8 @@
-package main
+package orderbook
 
 import (
 	"fmt"
+	"math/rand"
 	"sort"
 	"time"
 )
@@ -19,6 +20,7 @@ type Match struct {
 // Limit: 指向所属的价格档位
 // TimeStamp: 纳秒时间戳，用于排序
 type Order struct {
+	ID        int64
 	Size      float64
 	Bid       bool
 	Limit     *Limit
@@ -33,6 +35,7 @@ func (o Orders) Less(i, j int) bool { return o[i].TimeStamp < o[j].TimeStamp }
 
 func NewOrder(bid bool, size float64) *Order {
 	return &Order{
+		ID:        int64(rand.Intn(1000000)),
 		Size:      size,
 		Bid:       bid,
 		TimeStamp: time.Now().UnixNano(),
@@ -105,6 +108,9 @@ func (l *Limit) DeleteOrder(o *Order) {
 
 }
 
+// Fill 将传入的订单 o 与当前价格档位中的所有订单进行撮合，
+// 逐个执行 fillOrder 直到 o 被完全成交或档位订单耗尽。
+// 返回所有撮合结果（Match），并从当前档位中移除已成交完毕的订单。
 func (l *Limit) Fill(o *Order) []Match {
 	var (
 		matchs        []Match
@@ -164,12 +170,16 @@ func (l *Limit) fillOrder(a, b *Order) Match {
 	}
 }
 
+// OrderBook 是订单簿，包含所有卖单(asks)和买单(bids)
+// AskLimits/BidLimits: 价格到价格档位的映射，用于快速查找
 type OrderBook struct {
 	asks []*Limit
 	bids []*Limit
 
 	AskLimits map[float64]*Limit
 	BidLimits map[float64]*Limit
+
+	Orders map[int64]*Order
 }
 
 func NewOrderBook() *OrderBook {
@@ -178,9 +188,15 @@ func NewOrderBook() *OrderBook {
 		bids:      []*Limit{},
 		AskLimits: make(map[float64]*Limit),
 		BidLimits: make(map[float64]*Limit),
+		Orders:    make(map[int64]*Order),
 	}
 }
 
+// PlaceMarketOrder 执行市价单撮合。
+// 市价单会立即与对手方订单簿中最佳价格档位进行撮合，直到指定数量全部成交。
+// 买单与卖单(asks)撮合，卖单与买单(bids)撮合。
+// 若对手方流动性不足则 panic。
+// 返回所有撮合结果。
 func (ob *OrderBook) PlaceMarketOrder(o *Order) []Match {
 	matchs := []Match{}
 
@@ -195,6 +211,12 @@ func (ob *OrderBook) PlaceMarketOrder(o *Order) []Match {
 			if len(limit.Orders) == 0 {
 				ob.DeleteLimit(false, limit)
 			}
+
+			// 市价单已完全成交后必须停止继续扫描后续价位，
+			// 否则会对剩余档位生成 SizeFilled 为 0 的无效 Match。
+			if o.isFilled() {
+				break
+			}
 		}
 	} else {
 		if o.Size > ob.BidTotalVolume() {
@@ -207,12 +229,21 @@ func (ob *OrderBook) PlaceMarketOrder(o *Order) []Match {
 			if len(limit.Orders) == 0 {
 				ob.DeleteLimit(true, limit)
 			}
+
+			if o.isFilled() {
+				break
+			}
 		}
 	}
 
 	return matchs
 }
 
+// PlaceLimitOrder 添加一笔限价单到订单簿。
+// price: 指定的成交价格
+// o: 订单，包含买卖方向和数量
+// 若该价格档位已存在，则将订单追加到该档位；否则创建新档位。
+// 限价单不会立即撮合，而是挂在订单簿中等待对手方。
 func (ob *OrderBook) PlaceLimitOrder(price float64, o *Order) {
 	var limit *Limit
 	if o.Bid {
@@ -223,7 +254,6 @@ func (ob *OrderBook) PlaceLimitOrder(price float64, o *Order) {
 
 	if limit == nil {
 		limit = NewLimit(price)
-		limit.AddOrder(o)
 
 		if o.Bid {
 			ob.bids = append(ob.bids, limit)
@@ -233,6 +263,8 @@ func (ob *OrderBook) PlaceLimitOrder(price float64, o *Order) {
 			ob.AskLimits[price] = limit
 		}
 	}
+	ob.Orders[o.ID] = o
+	limit.AddOrder(o)
 }
 
 func (ob *OrderBook) DeleteLimit(bid bool, l *Limit) {
@@ -255,6 +287,12 @@ func (ob *OrderBook) DeleteLimit(bid bool, l *Limit) {
 			}
 		}
 	}
+}
+
+func (ob *OrderBook) CancelOrder(o *Order) {
+	limit := o.Limit
+	limit.DeleteOrder(o)
+	delete(ob.Orders, o.ID)
 }
 
 func (ob *OrderBook) BidTotalVolume() float64 {

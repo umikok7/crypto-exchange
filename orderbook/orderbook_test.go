@@ -1,4 +1,4 @@
-package main
+package orderbook
 
 import (
 	"fmt"
@@ -46,6 +46,8 @@ func TestPlaceLimitOrder(t *testing.T) {
 	ob.PlaceLimitOrder(10_000, sellOrderA)
 	ob.PlaceLimitOrder(9_000, sellOrderB)
 
+	assert(t, ob.Orders[sellOrderA.ID], sellOrderA)
+
 	assert(t, len(ob.asks), 2)
 }
 
@@ -77,23 +79,61 @@ func TestPlaceMarketOrderMultiFill(t *testing.T) {
 	buyOrderA := NewOrder(true, 5)
 	buyOrderB := NewOrder(true, 8)
 	buyOrderC := NewOrder(true, 10)
+	buyOrderD := NewOrder(true, 1)
 
 	// ob.PlaceLimitOrder(10_000, buyOrderA)
 	// ob.PlaceLimitOrder(9_000, buyOrderB)
 	// ob.PlaceLimitOrder(5_000, buyOrderC)
 
-	ob.PlaceLimitOrder(5_000, buyOrderA)
+	ob.PlaceLimitOrder(5_000, buyOrderC)
+	ob.PlaceLimitOrder(5_000, buyOrderD)
 	ob.PlaceLimitOrder(9_000, buyOrderB)
-	ob.PlaceLimitOrder(10_000, buyOrderC)
+	ob.PlaceLimitOrder(10_000, buyOrderA)
 
-	assert(t, ob.BidTotalVolume(), 23.00)
+	assert(t, ob.BidTotalVolume(), 24.00)
 
 	sellOrder := NewOrder(false, 20)
 	matches := ob.PlaceMarketOrder(sellOrder)
 
-	assert(t, ob.BidTotalVolume(), 3.00)
+	assert(t, ob.BidTotalVolume(), 4.00)
 	assert(t, len(matches), 3)
 	assert(t, len(ob.bids), 1)
 
 	fmt.Printf("%+v", matches)
+}
+
+// by codex
+func TestPlaceMarketOrderStopsAfterFilled(t *testing.T) {
+	ob := NewOrderBook()
+
+	buyOrderA := NewOrder(true, 10)
+	buyOrderB := NewOrder(true, 1)
+	ob.PlaceLimitOrder(9_000, buyOrderA)
+	ob.PlaceLimitOrder(8_000, buyOrderB)
+
+	sellOrder := NewOrder(false, 1)
+	matches := ob.PlaceMarketOrder(sellOrder)
+
+	assert(t, len(matches), 1)
+	assert(t, matches[0].Bid, buyOrderA)
+	assert(t, matches[0].Ask, sellOrder)
+	assert(t, matches[0].SizeFilled, 1.0)
+	assert(t, matches[0].Price, 9_000.0)
+	assert(t, ob.BidTotalVolume(), 10.0)
+}
+
+func TestCancelOrder(t *testing.T) {
+	ob := NewOrderBook()
+
+	buyOrderA := NewOrder(true, 4)
+	ob.PlaceLimitOrder(10_000, buyOrderA)
+
+	assert(t, ob.BidTotalVolume(), 4.0)
+
+	ob.CancelOrder(buyOrderA)
+
+	assert(t, ob.BidTotalVolume(), 0.0)
+
+	_, ok := ob.Orders[buyOrderA.ID]
+	assert(t, ok, false)
 }
