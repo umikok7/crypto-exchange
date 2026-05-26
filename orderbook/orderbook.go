@@ -21,6 +21,7 @@ type Match struct {
 // TimeStamp: 纳秒时间戳，用于排序
 type Order struct {
 	ID        int64
+	UserID    int64
 	Size      float64
 	Bid       bool
 	Limit     *Limit
@@ -33,9 +34,10 @@ func (o Orders) Len() int           { return len(o) }
 func (o Orders) Swap(i, j int)      { o[i], o[j] = o[j], o[i] }
 func (o Orders) Less(i, j int) bool { return o[i].TimeStamp < o[j].TimeStamp }
 
-func NewOrder(bid bool, size float64) *Order {
+func NewOrder(bid bool, size float64, userId int64) *Order {
 	return &Order{
 		ID:        int64(rand.Intn(1000000)),
+		UserID:    userId,
 		Size:      size,
 		Bid:       bid,
 		TimeStamp: time.Now().UnixNano(),
