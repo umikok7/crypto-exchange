@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -175,6 +176,7 @@ func (l *Limit) fillOrder(a, b *Order) Match {
 // OrderBook 是订单簿，包含所有卖单(asks)和买单(bids)
 // AskLimits/BidLimits: 价格到价格档位的映射，用于快速查找
 type OrderBook struct {
+	om   sync.RWMutex
 	asks []*Limit
 	bids []*Limit
 
@@ -186,6 +188,7 @@ type OrderBook struct {
 
 func NewOrderBook() *OrderBook {
 	return &OrderBook{
+		om:        sync.RWMutex{},
 		asks:      []*Limit{},
 		bids:      []*Limit{},
 		AskLimits: make(map[float64]*Limit),
@@ -248,6 +251,8 @@ func (ob *OrderBook) PlaceMarketOrder(o *Order) []Match {
 // 限价单不会立即撮合，而是挂在订单簿中等待对手方。
 func (ob *OrderBook) PlaceLimitOrder(price float64, o *Order) {
 	var limit *Limit
+	ob.om.Lock()
+	defer ob.om.Unlock()
 	if o.Bid {
 		limit = ob.BidLimits[price]
 	} else {
